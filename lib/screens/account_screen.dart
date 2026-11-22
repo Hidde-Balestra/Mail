@@ -58,6 +58,19 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _busy = false;
   String? _status;
   bool _statusOk = false;
+  CertificateProblem? _certFix;
+
+  /// Vervangt de foute host (SMTP en IMAP) door de host uit het certificaat en test opnieuw.
+  void _applyCertFix() {
+    final fix = _certFix!;
+    for (final f in [_smtp, _imap]) {
+      if (f.host.text.trim().toLowerCase() == fix.host.toLowerCase()) {
+        f.host.text = fix.suggestedHost!;
+      }
+    }
+    setState(() => _certFix = null);
+    _test();
+  }
 
   @override
   void initState() {
@@ -98,6 +111,7 @@ class _AccountScreenState extends State<AccountScreen> {
       _busy = true;
       _status = 'Verbinding testen...';
       _statusOk = false;
+      _certFix = null;
     });
     final account = _buildAccount();
     final service = MailService();
@@ -111,7 +125,10 @@ class _AccountScreenState extends State<AccountScreen> {
         _statusOk = true;
       });
     } catch (e) {
-      setState(() => _status = describeMailError(e));
+      setState(() {
+        _status = describeMailError(e);
+        _certFix = e is CertificateProblem && e.suggestedHost != null ? e : null;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -130,9 +147,11 @@ class _AccountScreenState extends State<AccountScreen> {
     final email = _email.text.trim();
     if (!email.contains('@')) return;
     final domain = email.split('@').last;
-    if (_smtp.host.text.isEmpty) _smtp.host.text = 'mail.$domain';
+    // Hoofddomein i.p.v. "mail.<domein>": bij veel hosters dekt het
+    // TLS-certificaat "mail." niet. Een certificaatfout stelt anders de juiste host voor.
+    if (_smtp.host.text.isEmpty) _smtp.host.text = domain;
     if (_smtp.user.text.isEmpty) _smtp.user.text = email;
-    if (_imap.host.text.isEmpty) _imap.host.text = 'mail.$domain';
+    if (_imap.host.text.isEmpty) _imap.host.text = domain;
     if (_imap.user.text.isEmpty) _imap.user.text = email;
   }
 
@@ -201,6 +220,15 @@ class _AccountScreenState extends State<AccountScreen> {
                       Expanded(child: Text(_status!)),
                     ],
                   ),
+                ),
+              ),
+            if (_certFix != null && !_busy)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _applyCertFix,
+                  icon: const Icon(Icons.auto_fix_high),
+                  label: Text('Gebruik "${_certFix!.suggestedHost}" als server'),
                 ),
               ),
             const SizedBox(height: 12),

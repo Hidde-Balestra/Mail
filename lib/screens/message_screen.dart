@@ -6,12 +6,20 @@ import '../models/mail_account.dart';
 import '../services/mail_service.dart';
 import 'compose_screen.dart';
 
-/// Toont één bericht uit de inbox.
+/// Toont één bericht uit een IMAP-map.
 class MessageScreen extends StatefulWidget {
   final MailAccount account;
+  final MailFolder folder;
+  final List<MailFolder> folders;
   final MimeMessage header;
 
-  const MessageScreen({super.key, required this.account, required this.header});
+  const MessageScreen({
+    super.key,
+    required this.account,
+    required this.folder,
+    required this.folders,
+    required this.header,
+  });
 
   @override
   State<MessageScreen> createState() => _MessageScreenState();
@@ -34,33 +42,85 @@ class _MessageScreenState extends State<MessageScreen> {
       return;
     }
     try {
-      final m = await MailService().fetchFull(widget.account.imap!, uid);
-      setState(() => _message = m);
+      final m = await MailService()
+          .fetchFull(widget.account.imap!, widget.folder.encodedPath, uid);
+      if (mounted) setState(() => _message = m);
     } catch (e) {
-      setState(() => _error = describeMailError(e));
+      if (mounted) setState(() => _error = describeMailError(e));
     }
   }
 
+  bool get _hasTrash => widget.folders.any((f) => f.role == FolderRole.trash);
+
   Future<void> _delete() async {
-    final ok = await showDialog<bool>(
+    final permanent = widget.folder.role == FolderRole.trash || !_hasTrash;
+    if (permanent) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Definitief verwijderen?'),
+          content: const Text('Het bericht wordt definitief van de server verwijderd.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Annuleren')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Verwijderen')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    await _run(
+      () => MailService().deleteMessage(
+          widget.account.imap!, widget.folder.encodedPath, widget.header.uid!),
+      permanent ? 'Bericht verwijderd' : 'Verplaatst naar Prullenbak',
+    );
+  }
+
+  Future<void> _move() async {
+    final targets =
+        widget.folders.where((f) => f.encodedPath != widget.folder.encodedPath).toList();
+    final target = await showModalBottomSheet<MailFolder>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Bericht verwijderen?'),
-        content: const Text('Het bericht wordt definitief van de server verwijderd.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Annuleren')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Verwijderen')),
-        ],
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (c) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(c).size.height * 0.7),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text('Verplaatsen naar', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              for (final f in targets)
+                ListTile(
+                  contentPadding: EdgeInsets.only(left: 16.0 + 20 * f.depth, right: 16),
+                  leading: const Icon(Icons.folder_outlined),
+                  title: Text(f.displayName),
+                  onTap: () => Navigator.pop(c, f),
+                ),
+            ],
+          ),
+        ),
       ),
     );
-    if (ok != true || !mounted) return;
+    if (target == null || !mounted) return;
+    await _run(
+      () => MailService().moveMessage(widget.account.imap!, widget.folder.encodedPath,
+          widget.header.uid!, target.encodedPath),
+      'Verplaatst naar ${target.displayName}',
+    );
+  }
+
+  /// Voert een actie uit, toont feedback en sluit het scherm bij succes.
+  Future<void> _run(Future<Object?> Function() action, String done) async {
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await MailService().deleteMessage(widget.account.imap!, widget.header.uid!);
+      await action();
+      messenger.showSnackBar(SnackBar(content: Text(done)));
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(describeMailError(e))));
+      messenger.showSnackBar(SnackBar(content: Text(describeMailError(e))));
     }
   }
 
@@ -84,6 +144,12 @@ class _MessageScreenState extends State<MessageScreen> {
                       ),
                     ),
           ),
+          if (widget.folders.length > 1)
+            IconButton(
+              tooltip: 'Verplaatsen',
+              icon: const Icon(Icons.drive_file_move_outline),
+              onPressed: widget.header.uid == null ? null : _move,
+            ),
           IconButton(
             tooltip: 'Verwijderen',
             icon: const Icon(Icons.delete_outline),
