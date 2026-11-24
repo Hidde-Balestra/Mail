@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../models/mail_account.dart';
 import '../services/mail_service.dart';
+import '../widgets/mail_body.dart';
 import 'compose_screen.dart';
 
 /// Toont één bericht uit een IMAP-map.
@@ -188,7 +189,16 @@ class _MessageScreenState extends State<MessageScreen> {
               child: Center(child: CircularProgressIndicator()),
             )
           else ...[
-            SelectableText(_bodyText(_message!)),
+            MailBody(
+              message: _message!,
+              onMailto: (address) => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      ComposeScreen(account: widget.account, initialTo: address),
+                ),
+              ),
+            ),
             if (_message!.findContentInfo().isNotEmpty) ...[
               const SizedBox(height: 16),
               Wrap(
@@ -211,15 +221,6 @@ class _MessageScreenState extends State<MessageScreen> {
   String _initial(MimeMessage m) {
     final s = m.from?.firstOrNull?.personalName ?? m.from?.firstOrNull?.email ?? '?';
     return s.isEmpty ? '?' : s[0].toUpperCase();
-  }
-
-  /// Toont platte tekst; valt terug op HTML met tags gestript.
-  String _bodyText(MimeMessage m) {
-    final plain = m.decodeTextPlainPart();
-    if (plain != null && plain.trim().isNotEmpty) return plain.trim();
-    final html = m.decodeTextHtmlPart();
-    if (html != null) return htmlToText(html);
-    return '(geen tekstinhoud)';
   }
 }
 

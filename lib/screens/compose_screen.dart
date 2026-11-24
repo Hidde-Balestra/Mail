@@ -5,12 +5,16 @@ import '../models/mail_account.dart';
 import '../services/account_store.dart';
 import '../services/mail_service.dart';
 import 'account_screen.dart';
+import 'message_screen.dart' show htmlToText;
 
 class ComposeScreen extends StatefulWidget {
   final MailAccount account;
   final MimeMessage? replyTo;
 
-  const ComposeScreen({super.key, required this.account, this.replyTo});
+  /// Vooraf ingevulde ontvanger (bijv. na tik op een mailto:-link).
+  final String? initialTo;
+
+  const ComposeScreen({super.key, required this.account, this.replyTo, this.initialTo});
 
   @override
   State<ComposeScreen> createState() => _ComposeScreenState();
@@ -42,6 +46,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialTo != null) _to.text = widget.initialTo!;
     final r = widget.replyTo;
     if (r != null) {
       final sender = (r.replyTo?.isNotEmpty ?? false) ? r.replyTo! : r.from;
@@ -49,7 +54,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
       final subj = r.decodeSubject() ?? '';
       _subject.text =
           subj.toLowerCase().startsWith('re:') ? subj : 'Re: $subj';
-      final original = r.decodeTextPlainPart() ?? '';
+      // HTML-only mails ook netjes citeren
+      final plain = r.decodeTextPlainPart();
+      final html = r.decodeTextHtmlPart();
+      final original = (plain != null && plain.trim().isNotEmpty)
+          ? plain.trim()
+          : (html != null ? htmlToText(html) : '');
       final fromName = r.from?.firstOrNull?.toString() ?? '';
       final quoted = original.split('\n').map((l) => '> $l').join('\n');
       _body.text = '\n\n$fromName schreef:\n$quoted';
