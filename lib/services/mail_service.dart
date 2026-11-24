@@ -33,6 +33,18 @@ class CertificateProblem implements Exception {
   String toString() => 'CertificateProblem($host, cert=$certificateHost): $details';
 }
 
+/// Server weigerde gebruikersnaam/wachtwoord.
+class LoginFailed implements Exception {
+  final String protocol; // 'SMTP' of 'IMAP'
+  final String username;
+  final String serverMessage;
+
+  LoginFailed(this.protocol, this.username, this.serverMessage);
+
+  @override
+  String toString() => 'LoginFailed($protocol, $username): $serverMessage';
+}
+
 /// Haalt de CN uit een X509-subject als "/CN=example.nl" of "CN=example.nl, O=..".
 String? _commonName(X509Certificate? cert) =>
     cert == null ? null : RegExp(r'CN=([^/,]+)').firstMatch(cert.subject)?.group(1)?.trim();
@@ -91,7 +103,11 @@ class MailService {
                 !client.serverInfo.supportsAuth(AuthMechanism.login)
             ? AuthMechanism.plain
             : AuthMechanism.login;
-        await client.authenticate(cfg.username, cfg.password, mechanism);
+        try {
+          await client.authenticate(cfg.username, cfg.password, mechanism);
+        } on SmtpException catch (e) {
+          throw LoginFailed('SMTP', cfg.username, e.message ?? '');
+        }
       }
     } catch (_) {
       await client.disconnect().catchError((_) {});
@@ -169,7 +185,11 @@ class MailService {
           await client.startTls();
         }
       });
-      await client.login(cfg.username, cfg.password);
+      try {
+        await client.login(cfg.username, cfg.password);
+      } on ImapException catch (e) {
+        throw LoginFailed('IMAP', cfg.username, e.message ?? '');
+      }
     } catch (_) {
       // Verbinding sluiten bij een mislukte login, anders blijft de socket open.
       await client.disconnect().catchError((_) {});
@@ -387,6 +407,12 @@ class MailFolder {
 
 /// Maakt van een exception een leesbare foutmelding.
 String describeMailError(Object e) {
+  if (e is LoginFailed) {
+    final hint = e.username.contains('@')
+        ? 'Controleer het wachtwoord.'
+        : 'Gebruik je volledige e-mailadres als gebruikersnaam.';
+    return '${e.protocol}-inloggen geweigerd voor "${e.username}". $hint';
+  }
   if (e is CertificateProblem) {
     final suggestion = e.suggestedHost;
     if (suggestion != null) {

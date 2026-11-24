@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/mail_account.dart';
 import '../services/account_store.dart';
 import '../services/mail_service.dart';
+import 'account_screen.dart';
 
 class ComposeScreen extends StatefulWidget {
   final MailAccount account;
@@ -24,6 +25,17 @@ class _ComposeScreenState extends State<ComposeScreen> {
   final _body = TextEditingController();
   bool _showCc = false;
   bool _sending = false;
+
+  /// Kan wijzigen als de gebruiker vanuit een foutmelding de instellingen aanpast.
+  late MailAccount _account = widget.account;
+
+  Future<void> _openSettings() async {
+    final updated = await Navigator.push<MailAccount>(
+      context,
+      MaterialPageRoute(builder: (_) => AccountScreen(existing: _account)),
+    );
+    if (updated != null && mounted) setState(() => _account = updated);
+  }
 
   static final _emailRe = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
@@ -89,7 +101,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
     final bcc = _split(_bcc.text);
     try {
       await MailService().send(
-        account: widget.account,
+        account: _account,
         to: to,
         cc: cc,
         bcc: bcc,
@@ -98,7 +110,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
         replyTo: widget.replyTo,
       );
       await AccountStore().addSent(SentMail(
-        accountId: widget.account.id,
+        accountId: _account.id,
         to: to,
         cc: cc,
         subject: _subject.text.trim(),
@@ -112,9 +124,13 @@ class _ComposeScreenState extends State<ComposeScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _sending = false);
+      final settingsProblem = e is LoginFailed || e is CertificateProblem;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(describeMailError(e)),
-        backgroundColor: Theme.of(context).colorScheme.error,
+        duration: const Duration(seconds: 8),
+        action: settingsProblem
+            ? SnackBarAction(label: 'Instellingen', onPressed: _openSettings)
+            : null,
       ));
     }
   }
@@ -152,7 +168,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
         key: _formKey,
         child: Column(
           children: [
-            _row('Van', Text('${widget.account.displayName} <${widget.account.email}>')),
+            _row('Van', Text('${_account.displayName} <${_account.email}>')),
             _field('Aan', _to, (v) => _validateList(v, required: true)),
             if (_showCc) ...[
               _field('CC', _cc, _validateList),

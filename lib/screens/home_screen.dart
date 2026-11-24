@@ -142,11 +142,23 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadAccounts();
   }
 
+  /// Herlaadt opgeslagen accountgegevens (bijv. na aanpassen vanuit het opstelscherm)
+  /// zonder mappen en berichten opnieuw op te halen.
+  Future<void> _syncAccountData() async {
+    final accounts = await _store.loadAccounts();
+    if (!mounted) return;
+    setState(() {
+      _accounts = accounts;
+      _account = accounts.where((a) => a.id == _account?.id).firstOrNull ?? _account;
+    });
+  }
+
   Future<void> _compose() async {
     final sent = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => ComposeScreen(account: _account!)),
     );
+    await _syncAccountData();
     if (sent == true && (_folder == null || _folder!.role == FolderRole.sent)) {
       _refresh();
     }
@@ -381,6 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+    await _syncAccountData(); // beantwoorden kan de instellingen hebben aangepast
     if (changed == true) {
       _refresh();
     } else if (!m.isSeen) {

@@ -55,6 +55,9 @@ class _AccountScreenState extends State<AccountScreen> {
   final _smtp = _ServerFields(ConnectionSecurity.starttls, 587);
   final _imap = _ServerFields(ConnectionSecurity.ssl, 993);
   bool _useImap = false;
+
+  /// SMTP gebruikt dezelfde gebruikersnaam/wachtwoord als IMAP (gebruikelijk bij hosters).
+  bool _sameLogin = true;
   bool _busy = false;
   String? _status;
   bool _statusOk = false;
@@ -84,8 +87,13 @@ class _AccountScreenState extends State<AccountScreen> {
         _useImap = true;
         _imap.load(e.imap!);
       }
+      _sameLogin = e.imap != null &&
+          e.smtp.username == e.imap!.username &&
+          e.smtp.password == e.imap!.password;
     }
   }
+
+  bool get _smtpUsesImapLogin => _useImap && _sameLogin;
 
   @override
   void dispose() {
@@ -96,14 +104,28 @@ class _AccountScreenState extends State<AccountScreen> {
     super.dispose();
   }
 
-  MailAccount _buildAccount() => MailAccount(
-        id: widget.existing?.id ??
-            DateTime.now().microsecondsSinceEpoch.toString(),
-        displayName: _name.text.trim(),
-        email: _email.text.trim(),
-        smtp: _smtp.build(),
-        imap: _useImap ? _imap.build() : null,
+  MailAccount _buildAccount() {
+    final imap = _useImap ? _imap.build() : null;
+    var smtp = _smtp.build();
+    if (_smtpUsesImapLogin) {
+      smtp = ServerConfig(
+        host: smtp.host,
+        port: smtp.port,
+        security: smtp.security,
+        username: imap!.username,
+        password: imap.password,
       );
+    }
+    return MailAccount(
+      id: widget.existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+      displayName: _name.text.trim(),
+      email: _email.text.trim(),
+      smtp: smtp,
+      imap: imap,
+    );
+  }
+
+  static final _emailRe = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
   Future<void> _test() async {
     if (!_formKey.currentState!.validate()) return;
@@ -183,8 +205,9 @@ class _AccountScreenState extends State<AccountScreen> {
                 keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
                     labelText: 'E-mailadres', hintText: 'jij@domein.nl'),
-                validator: (v) =>
-                    v != null && v.contains('@') ? null : 'Ongeldig e-mailadres',
+                validator: (v) => v != null && _emailRe.hasMatch(v.trim())
+                    ? null
+                    : 'Ongeldig e-mailadres (bijv. naam@domein.nl)',
               ),
             ),
             const SizedBox(height: 24),
@@ -300,17 +323,36 @@ class _AccountScreenState extends State<AccountScreen> {
           ),
         ],
       ),
-      const SizedBox(height: 12),
-      TextFormField(
-        controller: f.user,
-        decoration: InputDecoration(
-          labelText: 'Gebruikersnaam',
-          helperText: isSmtp ? 'Leeg laten als de server geen login vereist' : null,
+      if (isSmtp && _useImap)
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Zelfde inloggegevens als IMAP'),
+          subtitle: const Text('Gebruikersnaam en wachtwoord van de inkomende server'),
+          value: _sameLogin,
+          onChanged: (v) => setState(() {
+            _sameLogin = v;
+            if (!v && f.user.text.isEmpty) {
+              // Startpunt bij uitzetten: neem de IMAP-gegevens over.
+              f.user.text = _imap.user.text;
+              f.password.text = _imap.password.text;
+            }
+          }),
         ),
-        validator: isSmtp ? null : _required,
-      ),
-      const SizedBox(height: 12),
-      _PasswordField(controller: f.password),
+      if (!(isSmtp && _smtpUsesImapLogin)) ...[
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: f.user,
+          decoration: InputDecoration(
+            labelText: 'Gebruikersnaam',
+            helperText: isSmtp
+                ? 'Meestal je volledige e-mailadres. Leeg = geen login.'
+                : 'Meestal je volledige e-mailadres',
+          ),
+          validator: isSmtp ? null : _required,
+        ),
+        const SizedBox(height: 12),
+        _PasswordField(controller: f.password),
+      ],
     ];
   }
 
