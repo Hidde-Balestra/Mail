@@ -76,11 +76,12 @@ class MailService {
 
   Future<SmtpClient> _connectSmtp(MailAccount account) async {
     final cfg = account.smtp;
-    final domain = account.email.contains('@')
-        ? account.email.split('@').last
-        : 'localhost';
+    // EHLO-naam: een adres-literal zoals Thunderbird gebruikt. Het domein van
+    // de afzender hier opgeven ("ehlo gmail.com") klopt niet met het IP van
+    // de telefoon en wordt door spamfilters (o.a. SpamAssassin) bestraft.
     X509Certificate? badCert;
-    final client = SmtpClient(domain, isLogEnabled: false, onBadCertificate: (c) {
+    final client = SmtpClient('[127.0.0.1]', isLogEnabled: false,
+        onBadCertificate: (c) {
       badCert = c;
       return false; // nooit ongeldige certificaten accepteren
     });
@@ -131,15 +132,18 @@ class MailService {
     required String body,
     MimeMessage? replyTo,
   }) async {
-    final from = MailAddress(account.displayName, account.email);
+    final name = account.displayName.trim();
+    final from = MailAddress(name.isEmpty ? null : name, account.email);
     final builder = replyTo != null
         ? MessageBuilder.prepareReplyToMessage(replyTo, from, replyAll: false)
         : MessageBuilder();
+    // Bcc bewust NIET in de headers: alleen in de SMTP-envelope hieronder.
+    // Anders ziet elke ontvanger de Bcc-lijst, en dat staat ook verdacht.
     builder
       ..from = [from]
       ..to = to.map((e) => MailAddress(null, e)).toList()
       ..cc = cc.map((e) => MailAddress(null, e)).toList()
-      ..bcc = bcc.map((e) => MailAddress(null, e)).toList()
+      ..bcc = null
       ..subject = subject
       ..text = body;
 
